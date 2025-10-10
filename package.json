@@ -53,6 +53,7 @@
     "@nanostores/react": "^0.8.4",
     "@patternfly/ast-helpers": "1.4.0-alpha.190",
     "@patternfly/patternfly": "^6.0.0",
+    "@patternfly/quickstarts": "^6.0.0",
     "@patternfly/react-code-editor": "^6.2.2",
     "@patternfly/react-core": "^6.0.0",
     "@patternfly/react-drag-drop": "^6.0.0",
@@ -60,7 +61,6 @@
     "@patternfly/react-styles": "^6.0.0",
     "@patternfly/react-table": "^6.0.0",
     "@patternfly/react-tokens": "^6.0.0",
-    "@patternfly/quickstarts": "^6.0.0",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
     "astro": "5.13.3",
@@ -73,7 +73,8 @@
     "react-dom": "^18.3.1",
     "react-error-boundary": "^6.0.0",
     "sass": "^1.89.2",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
     "@babel/plugin-transform-modules-commonjs": "^7.26.3",

@@ -152,6 +152,129 @@ function extractEnumValues(typeString) {
   return []
 }
 
+function mapTypeToZod(typeString, enumValues, defaultValue, required = true) {
+  let zodType = 'z.any()'
+  
+  // Handle enum/union types first
+  if (enumValues && enumValues.length > 0) {
+    const enumString = enumValues.map(val => `'${val}'`).join(', ')
+    zodType = `z.enum([${enumString}])`
+  }
+  // Handle union types with numbers (like 0 | 1 | 2 | 3)
+  else if (typeString.includes('|') && /\d/.test(typeString)) {
+    const values = typeString.split('|').map(v => v.trim())
+    const allNumbers = values.every(v => !isNaN(Number(v)))
+    if (allNumbers) {
+      zodType = `z.union([${values.map(v => `z.literal(${v})`).join(', ')}])`
+    } else {
+      zodType = 'z.any()'
+    }
+  }
+  // Handle basic types
+  else if (typeString.includes('string') || typeString === 'string') {
+    zodType = 'z.string()'
+  }
+  else if (typeString.includes('number') || typeString === 'number') {
+    zodType = 'z.number()'
+  }
+  else if (typeString.includes('boolean') || typeString === 'boolean') {
+    zodType = 'z.boolean()'
+  }
+  else if (typeString.includes('Date') || typeString === 'Date') {
+    zodType = 'z.date()'
+  }
+  // Handle array types
+  else if (typeString.includes('[]') || typeString.includes('Array<')) {
+    const baseType = typeString.replace(/\[\]|Array<|>/g, '').trim()
+    const innerZodType = mapTypeToZod(baseType, null, null, true).replace(/\.optional\(\)|\.default\([^)]*\)/g, '')
+    zodType = `z.array(${innerZodType})`
+  }
+  // Handle React types
+  else if (typeString.includes('ReactNode') || typeString.includes('React.ReactNode')) {
+    zodType = 'z.any()'
+  }
+  else if (typeString.includes('ReactElement') || typeString.includes('React.ReactElement')) {
+    zodType = 'z.any()'
+  }
+  else if (typeString.includes('MouseEvent') || typeString.includes('KeyboardEvent') || typeString.includes('Event')) {
+    zodType = 'z.any()'
+  }
+  // Handle function types
+  else if (typeString.includes('=>') || typeString.includes('function') || typeString.includes('Function')) {
+    zodType = 'z.function()'
+  }
+  // Handle object types
+  else if (typeString.includes('{') && typeString.includes('}')) {
+    zodType = 'z.object({})'
+  }
+  // Handle undefined/null
+  else if (typeString === 'undefined') {
+    zodType = 'z.undefined()'
+  }
+  else if (typeString === 'null') {
+    zodType = 'z.null()'
+  }
+  
+  // Add optional modifier if not required
+  if (!required) {
+    zodType += '.optional()'
+  }
+  
+  // Add default value if provided
+  if (defaultValue !== undefined && defaultValue !== null) {
+    // Handle different default value types
+    if (typeof defaultValue === 'string') {
+      // Remove surrounding quotes if they exist
+      const cleanValue = defaultValue.replace(/^['"]|['"]$/g, '')
+      
+      if (cleanValue === 'true' || cleanValue === 'false') {
+        zodType += `.default(${cleanValue})`
+      } else if (!isNaN(Number(cleanValue)) && cleanValue !== '') {
+        zodType += `.default(${cleanValue})`
+      } else {
+        // For string values, use single quotes
+        zodType += `.default('${cleanValue}')`
+      }
+    } else {
+      zodType += `.default(${defaultValue})`
+    }
+  }
+  
+  return zodType
+}
+
+function generateZodSchemaFromProps(props, componentName) {
+  if (!props || props.length === 0) {
+    return `export const ${componentName}Schema = z.object({})`
+  }
+  
+  const propSchemas = props.map(prop => {
+    // If required is not explicitly set to true, treat it as optional
+    const isRequired = prop.required === true
+    const zodType = mapTypeToZod(prop.type, prop.enumValues, prop.defaultValue, isRequired)
+    // Handle special prop names like aria-label by quoting them
+    const needsQuotes = prop.name.includes('-') || prop.name === 'Unknown' || !prop.name.match(/^[a-zA-Z_$][a-zA-Z0-9_$]*$/)
+    const propName = needsQuotes ? `'${prop.name}'` : prop.name
+    return `  ${propName}: ${zodType}`
+  })
+  
+  return `export const ${componentName}Schema = z.object({\n${propSchemas.join(',\n')}\n})`
+}
+
+function generateZodOutput(parsedData) {
+  const imports = "import { z } from 'zod'\n\n"
+  
+  const schemas = parsedData.map(({ name, props }) => 
+    generateZodSchemaFromProps(props, name)
+  ).join('\n\n')
+  
+  const typeExports = parsedData.map(({ name }) => 
+    `export type ${name} = z.infer<typeof ${name}Schema>`
+  ).join('\n')
+  
+  return `${imports}${schemas}\n\n${typeExports}\n`
+}
+
 function normalizeProp([
   name,
   { required, annotatedType, type, tsType, description, defaultValue },
@@ -185,7 +308,7 @@ function normalizeProp([
   return res
 }
 
-export async function tsDocgen(file) {
+export async function tsDocgen(file, outputFormat = 'json') {
   const sourceText = await readFile(file, 'utf8')
   const componentMeta = getComponentMetadata(file, sourceText) // Array of components with props
   const interfaceMeta = getInterfaceMetadata(file, sourceText) // Array of interfaces with props
@@ -211,7 +334,26 @@ export async function tsDocgen(file) {
     }
   })
 
-  return [...componentMeta, ...interfaceMeta, ...typeAliasMeta].map(
+  const allParsed = [...componentMeta, ...interfaceMeta, ...typeAliasMeta]
+  
+  // For Zod output, filter out components that have a matching interface
+  // This prevents duplicate schemas and prefers interface definitions over component implementations
+  const parsedToUse = outputFormat === 'zod' 
+    ? allParsed.filter((parsed, index, array) => {
+        // If this is a component, check if a matching Props interface exists
+        const isComponent = componentMeta.includes(parsed)
+        if (isComponent) {
+          const interfaceName = `${parsed.displayName}Props`
+          const hasMatchingInterface = array.some(p => p.displayName === interfaceName)
+          if (hasMatchingInterface) {
+            return false // Skip component, keep interface instead
+          }
+        }
+        return true
+      })
+    : allParsed
+
+  const parsedData = parsedToUse.map(
     (parsed) => ({
       name: parsed.displayName,
       description: parsed.description || '',
@@ -222,4 +364,11 @@ export async function tsDocgen(file) {
         .sort((p1, p2) => p1.name.localeCompare(p2.name)),
     }),
   )
+
+  // Return different formats based on outputFormat parameter
+  if (outputFormat === 'zod') {
+    return generateZodOutput(parsedData)
+  }
+  
+  return parsedData
 }

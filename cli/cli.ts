@@ -10,6 +10,7 @@ import { updatePackageFile } from './updatePackageFile.js'
 import { DocsConfig, getConfig } from './getConfig.js'
 import { symLinkConfig } from './symLinkConfig.js'
 import { buildPropsData } from './buildPropsData.js'
+import { buildZodSchemas } from './buildZodSchemas.js'
 import { hasFile } from './hasFile.js'
 import { convertToMDX } from './convertToMDX.js'
 import { mkdir } from 'fs/promises'
@@ -188,6 +189,25 @@ program.command('generate-props').action(async () => {
   await generateProps(program, true)
   console.log('\nProps data generated')
 })
+
+program.command('generate-zod-schemas')
+  .option('-o, --output <file>', 'Output file path (default: outputDir/schemas.ts)')
+  .action(async (options) => {
+    const { verbose } = program.opts()
+    const { repoRoot } = config
+    const rootDir = repoRoot ? resolve(currentDir, repoRoot) : currentDir
+
+    if (verbose) {
+      console.log('Verbose mode enabled')
+    }
+
+    const outputFile = options.output ? resolve(currentDir, options.output) : undefined
+    const schemaPath = await buildZodSchemas(rootDir, `${currentDir}/pf-docs.config.mjs`, verbose, outputFile)
+    
+    if (schemaPath) {
+      console.log(`\nZod schemas generated at: ${schemaPath}`)
+    }
+  })
 
 program.command('serve').action(async () => {
   await updateContent(program)
